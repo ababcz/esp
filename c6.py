@@ -7,8 +7,8 @@ pin_rgb = Pin(8, Pin.OUT)
 np = NeoPixel(pin_rgb, 1)
 
 # Definice barev
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
+RED = (16, 0, 0)
+BLUE = (0, 0, 16)
 OFF = (0, 0, 0)
 
 def blikani_majaku(pocet_opakovani=10):
