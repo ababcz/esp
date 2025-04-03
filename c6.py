@@ -17,10 +17,10 @@ def blikani_majaku(pocet_opakovani=10):
         for _ in range(4):
             np[0] = RED
             np.write()
-            sleep(0.1)
+            sleep(0.05)
             np[0] = OFF
             np.write()
-            sleep(0.1)
+            sleep(0.05)
 
         sleep(0.2)
 
