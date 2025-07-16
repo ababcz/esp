@@ -14,7 +14,7 @@ OFF = (0, 0, 0)
 def blikani_majaku(pocet_opakovani=10):
     for _ in range(pocet_opakovani):
         # Dvakrát rychle červená
-        for _ in range(1):
+        for _ in range(4):
             np[0] = RED
             np.write()
             sleep(0.05)
@@ -22,7 +22,7 @@ def blikani_majaku(pocet_opakovani=10):
             np.write()
             sleep(0.05)
 
-        sleep(0.2)
+        sleep(0.1)
 
         # Dvakrát rychle modrá
         for _ in range(4):
