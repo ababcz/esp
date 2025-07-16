@@ -1,3 +1,6 @@
+# main.py - Finální, funkční updater pro ESP32
+# Tento skript správně komunikuje s GitHub API, včetně povinné User-Agent hlavičky.
+
 import network
 import urequests
 import time
@@ -7,102 +10,167 @@ import gc
 from machine import Pin
 from neopixel import NeoPixel
 
-# --- Konfigurace ---
-SSID       = ""
-PASSWORD   = ""
-USERNAME   = "ababcz"
-REPO       = "esp"
-FILEPATH   = "c6.py"
-SHA_STORE  = "last_sha.json"
+# --- UŽIVATELSKÁ KONFIGURACE ---
+WIFI_SSID    = ""
+WIFI_PASSWORD = ""
 
-# Pin pro RGB LED (NeoPixel)
-LED_PIN    = 8
-np         = NeoPixel(Pin(LED_PIN, Pin.OUT), 1)
+GITHUB_USER  = "ababcz"
+GITHUB_REPO  = "esp"
+GITHUB_FILE  = "c6.py"
 
-# Barvy
+# VOLITELNÉ: Pro zvýšení limitu API dotazů (z 60 na 5000/hod)
+GITHUB_TOKEN = "" # Např. "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# --- INTERNÍ NASTAVENÍ ---
+SHA_FILENAME = "c6_version.json"
+LED_PIN      = 8
+np           = NeoPixel(Pin(LED_PIN, Pin.OUT), 1)
+
+# Barvy pro LED indikaci
 RED, GREEN, BLUE, YELLOW, OFF = (8,0,0), (0,8,0), (0,0,8), (8,8,0), (0,0,0)
 
-# --- Pomocné funkce ---
-def blik(barva):
-    np[0] = barva
+# --- FUNKCE ---
+
+def led_status(color):
+    """Zobrazí stav pomocí NeoPixel LED."""
+    np[0] = color
     np.write()
 
-def WiFi_connect(ssid, pwd):
+def connect_to_wifi():
+    """Připojí zařízení k Wi-Fi síti."""
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
-    if not wlan.isconnected():
-        blik(BLUE)
-        wlan.connect(ssid, pwd)
-        for _ in range(10):
-            if wlan.isconnected(): break
-            time.sleep(1)
     if wlan.isconnected():
-        blik(GREEN)
         return True
-    blik(RED)
+
+    print("Připojování k Wi-Fi...")
+    led_status(BLUE)
+    wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+    for _ in range(15):
+        if wlan.isconnected():
+            print(f"Wi-Fi připojeno, IP adresa: {wlan.ifconfig()[0]}")
+            led_status(GREEN)
+            return True
+        time.sleep(1)
+
+    print("Připojení k Wi-Fi selhalo.")
+    led_status(RED)
     return False
 
-def load_sha():
+def get_local_sha():
+    """Načte SHA posledního staženého souboru z interní paměti."""
     try:
-        with open(SHA_STORE) as f:
-            return json.load(f).get("sha")
-    except:
+        with open(SHA_FILENAME, 'r') as f:
+            return json.load(f).get('sha')
+    except (OSError, ValueError):
         return None
 
-def save_sha(sha):
-    with open(SHA_STORE, "w") as f:
-        json.dump({"sha": sha}, f)
+def get_remote_sha():
+    """Získá nejnovější SHA commitu z GitHubu."""
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/git/refs/heads/main"
+    
+    # --- DŮLEŽITÁ ZMĚNA ZDE ---
+    # Všechny požadavky musí mít User-Agent hlavičku.
+    headers = {
+        'User-Agent': 'ESP32-Updater-Script'
+    }
+    # -------------------------
 
-def fetch_sha():
-    url = f"https://api.github.com/repos/{USERNAME}/{REPO}/git/refs/heads/main"
-    resp = urequests.get(url)
-    if resp.status_code == 200:
-        sha = resp.json()["object"]["sha"]
-        resp.close(); gc.collect()
-        return sha
-    resp.close(); gc.collect()
-    return None
+    if GITHUB_TOKEN:
+        headers['Authorization'] = f"token {GITHUB_TOKEN}"
 
-def fetch_code(sha):
-    url = f"https://raw.githubusercontent.com/{USERNAME}/{REPO}/{sha}/{FILEPATH}"
-    resp = urequests.get(url)
-    if resp.status_code == 200:
-        code = resp.text
-        resp.close(); gc.collect()
-        return code
-    resp.close(); gc.collect()
-    return None
+    print(f"Získávání remote SHA z: {url}")
+    response = None
+    try:
+        response = urequests.get(url, headers=headers)
+        if response.status_code == 200:
+            sha = response.json()['object']['sha']
+            return sha
+        else:
+            print(f"Chyba při komunikaci s GitHub API: Status {response.status_code}")
+            print(f"Odpověď serveru: {response.text}")
+            return None
+    except Exception as e:
+        print(f"Chyba sítě při získávání SHA: {e}")
+        return None
+    finally:
+        if response:
+            response.close()
+        gc.collect()
 
-def update_once():
-    blik(YELLOW)
-    old = load_sha()
-    new = fetch_sha()
-    if not new or new == old:
-        # nic ke stažení, nebo stejné SHA
-        blik(GREEN)
+def download_and_save(sha):
+    """Stáhne soubor podle SHA a uloží ho."""
+    url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{sha}/{GITHUB_FILE}"
+    print(f"Stahování nové verze: {url}")
+    response = None
+    try:
+        # Pro stahování raw souboru není User-Agent obvykle potřeba, ale neuškodí.
+        headers = {'User-Agent': 'ESP32-Updater-Script'}
+        response = urequests.get(url, headers=headers)
+        if response.status_code == 200:
+            with open(GITHUB_FILE, 'w') as f:
+                f.write(response.text)
+            with open(SHA_FILENAME, 'w') as f:
+                json.dump({'sha': sha}, f)
+            print("Soubor úspěšně aktualizován.")
+            return True
+        else:
+            print(f"Chyba při stahování souboru: Status {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"Chyba sítě při stahování souboru: {e}")
         return False
-    code = fetch_code(new)
-    if code:
-        with open(FILEPATH, "w") as f:
-            f.write(code)
-        save_sha(new)
-        blik(BLUE)
-        return True
-    blik(RED)
-    return False
+    finally:
+        if response:
+            response.close()
+        gc.collect()
 
 def run_script():
-    blik(BLUE)
-    with open(FILEPATH) as f:
-        exec(f.read(), globals())
+    """Spustí stažený skript 'c6.py'."""
+    print(f"\n--- Spouštění skriptu '{GITHUB_FILE}' ---")
+    try:
+        with open(GITHUB_FILE, 'r') as f:
+            exec(f.read(), globals())
+    except OSError:
+        print(f"Chyba: Skript '{GITHUB_FILE}' nenalezen.")
+        led_status(RED)
+    except Exception as e:
+        print(f"Chyba při spouštění '{GITHUB_FILE}': {e}")
+        led_status(RED)
 
-# --- Hlavní program ---
+# --- HLAVNÍ ČÁST PROGRAMU ---
+
 def main():
-    if WiFi_connect(SSID, PASSWORD):
-        updated = update_once()
-        if updated or FILEPATH in os.listdir():
-            run_script()
-    blik(OFF)
+    if not connect_to_wifi():
+        return
+
+    print("\n--- Kontrola aktualizací ---")
+    led_status(YELLOW)
+    
+    local_sha = get_local_sha()
+    remote_sha = get_remote_sha()
+
+    if remote_sha and local_sha != remote_sha:
+        print(f"Nalezena nová verze. Stahuji...")
+        if download_and_save(remote_sha):
+            led_status(BLUE)
+        else:
+            led_status(RED)
+    elif remote_sha:
+        print("Máte nejnovější verzi.")
+        led_status(GREEN)
+    else:
+        print("Nepodařilo se zkontrolovat aktualizace.")
+
+    if GITHUB_FILE in os.listdir():
+        run_script()
+    else:
+        print(f"Soubor '{GITHUB_FILE}' není k dispozici pro spuštění.")
+
+    print("\nProgram dokončen.")
+    time.sleep(1)
+    led_status(OFF)
 
 if __name__ == "__main__":
     main()
+
