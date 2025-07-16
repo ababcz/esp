@@ -41,4 +41,4 @@ def blikani_majaku(pocet_opakovani=10):
 
 # Spuštění blikání majáku s 10 opakováními
 blikani_majaku()
-
+#1254
