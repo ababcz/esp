@@ -6,7 +6,7 @@ import os
 import urandom
 from machine import Pin
 from neopixel import NeoPixel
-#1223
+#1234
 # Nastavení RGB LED na GPIO 8 (1 LED)
 pin_rgb = Pin(8, Pin.OUT)
 np = NeoPixel(pin_rgb, 1)
