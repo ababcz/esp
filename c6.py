@@ -1,43 +1,33 @@
-from machine import Pin
-from neopixel import NeoPixel
-from time import sleep
+import urequests
 
-# Nastavení RGB LED na GPIO 8 (1 LED)
-pin_rgb = Pin(8, Pin.OUT)
-np = NeoPixel(pin_rgb, 1)
+def alog(text):
+    """
+    Pošle text do Google formuláře jako odpověď do pole 'message'
+    
+    Args:
+        text (str): Text, který se má odeslat do formuláře
+    
+    Returns:
+        bool: True pokud se odeslání podařilo, False při chybě
+    """
+    url = 'https://docs.google.com/forms/d/e/1FAIpQLSfJ4nKZl57DCv2YwE9NrBH9qhcLbECsYbe0-VBuYXBeE5VDjQ/formResponse'
+    
+    # Formát dat pro Google formulář
+    form_data = f'entry.443464588={text}'
+    
+    # Hlavičky pro POST request
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
+    try:
+        response = urequests.post(url, data=form_data, headers=headers)
+        response.close()  # Důležité pro uvolnění paměti
+        return True
+    except Exception as e:
+        print(f'Chyba při odesílání: {e}')
+        return False
 
-# Definice barev
-RED = (8, 0, 0)
-BLUE = (0, 0, 8)
-OFF = (0, 0, 0)
+# Použití funkce:
+# alog("Testovací zpráva")
 
-def blikani_majaku(pocet_opakovani=10):
-    for _ in range(pocet_opakovani):
-        # Dvakrát rychle červená
-        for _ in range(4):
-            np[0] = RED
-            np.write()
-            sleep(0.05)
-            np[0] = OFF
-            np.write()
-            sleep(0.05)
+alog("Testovací zpráva")
 
-        #sleep(0.1)
-
-        # Dvakrát rychle modrá
-        for _ in range(4):
-            np[0] = BLUE
-            np.write()
-            sleep(0.05)
-            np[0] = OFF
-            np.write()
-            sleep(0.05)
-
-        #sleep(0.1)
-
-    # Po ukončení zhasni LED
-    np[0] = OFF
-    np.write()
-
-# Spuštění blikání majáku s 10 opakováními
-blikani_majaku()
