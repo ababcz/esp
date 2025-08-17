@@ -17,164 +17,136 @@ alog("C6 start")
 
 
 
+# Testování komunikace s CC1101 na nanoESP32-C6
+# Používá předpřipravenou funkci alog(text) pro debug zprávy
+
 from machine import Pin, SPI
 import time
 
-# Definice pinů podle specifikovaného propojení
-MOSI_PIN = 6    # nanoesp32-c6 GPIO6 -> CC1101 MOSI
-SCLK_PIN = 7    # nanoesp32-c6 GPIO7 -> CC1101 SCLK  
-MISO_PIN = 1    # nanoesp32-c6 GPIO1 -> CC1101 MISO
-GDO2_PIN = 10   # nanoesp32-c6 GPIO10 -> CC1101 GDO2
-GDO0_PIN = 11   # nanoesp32-c6 GPIO11 -> CC1101 GDO0
-CSN_PIN = 12    # nanoesp32-c6 GPIO12 -> CC1101 CSN
+# Definice pinů podle zadání
+MOSI_PIN = 23
+SCLK_PIN = 22  
+MISO_PIN = 21
+CSN_PIN = 18
+GDO2_PIN = 20
+GDO0_PIN = 19
+
+# CC1101 registry a příkazy
+CC1101_PARTNUM = 0x30     # Registr s číslem části čipu
+CC1101_VERSION = 0x31     # Registr s verzí čipu
+CC1101_SRES = 0x30        # Reset strobe příkaz
 
 def init_spi():
-    """Inicializace SPI komunikace a CSN pinu"""
-    alog("Inicializuji SPI komunikaci")
+    """Inicializace SPI rozhraní"""
+    alog("Inicializuji SPI rozhrani")
+    spi = SPI(1, 
+              baudrate=5000000,    # 5 MHz
+              polarity=0, 
+              phase=0,
+              sck=Pin(SCLK_PIN), 
+              mosi=Pin(MOSI_PIN), 
+              miso=Pin(MISO_PIN))
     
-    # Konfigurace SPI: baudrate 5MHz, CPOL=0, CPHA=0
-    spi = SPI(1, baudrate=5000000, polarity=0, phase=0, 
-              sck=Pin(SCLK_PIN), mosi=Pin(MOSI_PIN), miso=Pin(MISO_PIN))
-    
-    # CSN pin jako výstup, defaultně HIGH (neaktivní)
-    csn = Pin(CSN_PIN, Pin.OUT, value=1)
-    
-    alog("SPI inicializace dokončena")
+    csn = Pin(CSN_PIN, Pin.OUT)
+    csn.value(1)  # CSN neaktivní (HIGH)
+    alog("SPI inicializovano uspesne")
     return spi, csn
 
-def cc1101_command(spi, csn, cmd):
-    """Odeslání příkazu do CC1101"""
-    csn.value(0)  # Aktivace CS
-    spi.write(bytearray([cmd]))
-    csn.value(1)  # Deaktivace CS
-    alog(f"Odeslán příkaz: 0x{cmd:02X}")
+def cc1101_strobe(spi, csn, strobe_cmd):
+    """Pošle strobe příkaz do CC1101"""
+    csn.value(0)  # Aktivuj CSN
+    response = spi.write_readinto(bytearray([strobe_cmd]), bytearray(1))
+    csn.value(1)  # Deaktivuj CSN
+    return response[0] if response else 0
 
-def cc1101_write_reg(spi, csn, addr, value):
-    """Zápis hodnoty do registru CC1101"""
-    csn.value(0)
-    spi.write(bytearray([addr, value]))
-    csn.value(1)
-    alog(f"Zapsán registr 0x{addr:02X} = 0x{value:02X}")
-
-def cc1101_read_reg(spi, csn, addr):
-    """Čtení hodnoty z registru CC1101"""
-    csn.value(0)
-    spi.write(bytearray([addr | 0x80]))  # Bit 7 = 1 pro čtení
-    result = spi.read(1)
-    value = result[0]
-    csn.value(1)
-    alog(f"Přečten registr 0x{addr:02X} = 0x{value:02X}")
-    return value
-
-def cc1101_read_status(spi, csn, addr):
-    """Čtení stavového registru CC1101"""
-    csn.value(0)
-    spi.write(bytearray([addr | 0xC0]))  # Burst/status read
-    result = spi.read(1)
-    value = result[0]
-    csn.value(1)
-    alog(f"Přečten status registr 0x{addr:02X} = 0x{value:02X}")
-    return value
+def cc1101_read_register(spi, csn, reg_addr):
+    """Přečte registr z CC1101"""
+    read_addr = reg_addr | 0x80  # Nastav read bit
+    csn.value(0)  # Aktivuj CSN
+    
+    # Pošli adresu a přečti odpověď
+    status = spi.write_readinto(bytearray([read_addr]), bytearray(1))[0]
+    value = spi.write_readinto(bytearray([0x00]), bytearray(1))
+    
+    csn.value(1)  # Deaktivuj CSN
+    return value, status
 
 def test_cc1101_communication():
-    """Hlavní testovací funkce pro ověření komunikace s CC1101"""
-    alog("=== ZAČÁTEK TESTU KOMUNIKACE S CC1101 ===")
+    """Hlavní test komunikace s CC1101"""
+    alog("Spoustim test komunikace s CC1101")
     
-    # Krok 1: Inicializace SPI
+    # Inicializace SPI
     try:
         spi, csn = init_spi()
-        alog("Krok 1: SPI inicializace úspěšná")
+        alog("SPI uspesne inicializovano")
     except Exception as e:
-        alog(f"Chyba při inicializaci SPI: {e}")
+        alog("Chyba pri inicializaci SPI")
         return False
     
-    # Krok 2: Reset modulu
-    alog("Krok 2: Provádím reset modulu CC1101")
+    # Malá pauza pro stabilizaci
+    time.sleep_ms(50)
+    
+    # Pokus o reset čipu
+    alog("Provadim reset CC1101")
     try:
-        cc1101_command(spi, csn, 0x30)  # SRES - Software reset
+        cc1101_strobe(spi, csn, CC1101_SRES)
         time.sleep_ms(100)  # Čekání na dokončení resetu
-        alog("Reset modulu dokončen")
+        alog("Reset CC1101 dokoncen")
     except Exception as e:
-        alog(f"Chyba při resetu modulu: {e}")
+        alog("Chyba pri resetu CC1101")
         return False
     
-    # Krok 3: Čtení identifikačních registrů
-    alog("Krok 3: Čtu identifikační registry")
+    # Test čtení PARTNUM registru
+    alog("Ctu PARTNUM registr")
     try:
-        # Čtení PARTNUM registru (0x30)
-        partnum = cc1101_read_status(spi, csn, 0x30)
+        partnum, status = cc1101_read_register(spi, csn, CC1101_PARTNUM)
+        alog(f"PARTNUM: 0x{partnum:02X}, Status: 0x{status:02X}")
         
-        # Čtení VERSION registru (0x31) 
-        version = cc1101_read_status(spi, csn, 0x31)
-        
-        alog(f"PARTNUM: 0x{partnum:02X}, VERSION: 0x{version:02X}")
-        
-        # Ověření správných hodnot pro CC1101
-        if partnum == 0x00:  # CC1101 PARTNUM
-            alog("✓ PARTNUM registr odpovídá CC1101")
-            partnum_ok = True
+        if partnum == 0x00:
+            alog("CC1101 PARTNUM je 0x00 - komunikace OK")
         else:
-            alog(f"⚠ PARTNUM neodpovídá očekávané hodnotě (0x00), získáno: 0x{partnum:02X}")
-            partnum_ok = False
-            
-        if version in [0x03, 0x04, 0x14]:  # Známé verze CC1101
-            alog(f"✓ VERSION registr je validní pro CC1101")
-            version_ok = True
-        else:
-            alog(f"⚠ VERSION může být neočekávaný: 0x{version:02X}")
-            version_ok = False
+            alog(f"Neocekavana hodnota PARTNUM: 0x{partnum:02X}")
+            return False
             
     except Exception as e:
-        alog(f"Chyba při čtení identifikačních registrů: {e}")
+        alog("Chyba pri cteni PARTNUM registru")
         return False
     
-    # Krok 4: Test zápisu a čtení registru
-    alog("Krok 4: Test zápisu a čtení konfiguračního registru")
+    # Test čtení VERSION registru  
+    alog("Ctu VERSION registr")
     try:
-        test_reg = 0x0B  # FSCTRL1 registr
-        original_value = cc1101_read_reg(spi, csn, test_reg)
-        alog(f"Původní hodnota registru 0x{test_reg:02X}: 0x{original_value:02X}")
+        version, status = cc1101_read_register(spi, csn, CC1101_VERSION)
+        alog(f"VERSION: 0x{version:02X}, Status: 0x{status:02X}")
         
-        # Zápis testovací hodnoty
-        test_value = 0x55  # Alternující bity
-        cc1101_write_reg(spi, csn, test_reg, test_value)
-        
-        # Přečtení zpět
-        read_back = cc1101_read_reg(spi, csn, test_reg)
-        
-        if read_back == test_value:
-            alog("✓ Test zápisu/čtení registru úspěšný")
-            write_test_ok = True
+        if version == 0x14:
+            alog("CC1101 VERSION je 0x14 - spravna verze chipu")
         else:
-            alog(f"✗ Test zápisu/čtení neúspěšný - očekáváno: 0x{test_value:02X}, získáno: 0x{read_back:02X}")
-            write_test_ok = False
-        
-        # Obnovení původní hodnoty
-        cc1101_write_reg(spi, csn, test_reg, original_value)
-        alog("Původní hodnota registru obnovena")
-        
+            alog(f"Neocekavana verze chipu: 0x{version:02X}")
+            return False
+            
     except Exception as e:
-        alog(f"Chyba při testu zápisu/čtení: {e}")
+        alog("Chyba pri cteni VERSION registru")
         return False
     
-    # Krok 5: Vyhodnocení celkového výsledku
-    alog("Krok 5: Vyhodnocení výsledků testu")
+    # Finální kontrola - několik čtení po sobě
+    alog("Provadim finalni test stability komunikace")
+    for i in range(3):
+        try:
+            partnum, _ = cc1101_read_register(spi, csn, CC1101_PARTNUM)
+            version, _ = cc1101_read_register(spi, csn, CC1101_VERSION)
+            alog(f"Test {i+1}: PARTNUM=0x{partnum:02X}, VERSION=0x{version:02X}")
+            time.sleep_ms(10)
+        except Exception as e:
+            alog(f"Chyba v testu {i+1}")
+            return False
     
-    if partnum_ok and (version_ok or version != 0xFF) and write_test_ok:
-        alog("🎉 KOMUNIKACE S CC1101 ÚSPĚŠNĚ OVĚŘENA!")
-        alog("✓ Všechny testy prošly úspěšně")
-        result = True
-    elif write_test_ok:
-        alog("⚠ KOMUNIKACE PRAVDĚPODOBNĚ FUNGUJE")  
-        alog("✓ Základní komunikace funguje, ale identifikační registry jsou neočekávané")
-        result = True
-    else:
-        alog("✗ KOMUNIKACE S CC1101 NEFUNGUJE SPRÁVNĚ")
-        alog("Zkontrolujte zapojení a napájení modulu")
-        result = False
-    
-    alog("=== KONEC TESTU KOMUNIKACE S CC1101 ===")
-    return result
+    alog("Komunikace s CC1101 uspesne overena!")
+    return True
 
-# Spuštění testu (bez __main__ bloku)
-test_result = test_cc1101_communication()
+# Spuštění testu
+alog("=== START CC1101 Test ===")
+result = test_cc1101_communication()
+if result:
+    alog("=== CC1101 Test USPESNY ===")
+else:
+    alog("=== CC1101 Test NEUSPESNY ===")
