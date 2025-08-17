@@ -29,5 +29,5 @@ def alog(text):
 # Použití funkce:
 # alog("Testovací zpráva")
 
-alog("Testovací zpráva")
+alog("Testovaci zprava, lorem ipsum, aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
